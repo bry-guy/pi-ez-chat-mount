@@ -1,32 +1,62 @@
 # pi-ez-chat-mount
 
-A pi extension that adds the current pi session's `cwd` as a sibling host-bind mount inside the Gondolin VM that `pi-chat` runs per connected conversation.
+Expose the current pi session `cwd` inside a `pi-chat` Gondolin VM as a top-level sibling mount, without changing `/workspace`.
 
-Status: **design/planning only**. Implementation has not started.
+Example: from `~/dev/infra`, `/chat-mount` configures `/infra -> ~/dev/infra` for the connected chat conversation.
 
-## What it does (target behavior)
+## Install
 
-- Adds `/chat-mount`, `/chat-unmount`, `/chat-mounts` commands.
-- `/chat-mount` takes no path argument: it mounts the current pi session's `cwd`.
-- Mount point is `/<repo>-<session_name>`, both segments sanitized.
-- Fails if the current pi session has no name; user must name the session first.
-- `/chat-mount --read-only` makes the mount read-only.
-- Mounts are **sibling roots** to `/workspace` and `/shared` inside the VM. `/workspace` semantics are unchanged.
-- Mounts are persisted per-conversation in extension-local storage, and re-applied automatically when `pi-chat` (re)creates the VM.
-- If a configured mount's host path is missing at VM start, the mount is skipped and the user is notified; the connection still proceeds.
-- Threads created via `pi-ez-chat-threads` inherit the parent channel's mounts at thread-creation time.
+```bash
+pi install /absolute/path/to/pi-ez-chat-mount
+```
 
-## Why this exists
+For one run:
 
-`pi-chat` mounts a durable per-conversation `/workspace` and per-account `/shared` into the VM. There is no built-in way to expose the user's local repository directly. `pi-ez-chat-handoff` solves this by copying files into the channel workspace, which causes drift and stale state.
+```bash
+pi -e /absolute/path/to/pi-ez-chat-mount
+```
 
-`pi-ez-chat-mount` makes the local repo a **first-class sibling mount** in the VM, leaving `/workspace` untouched and avoiding copy/sync semantics entirely.
+Load this extension before `pi-chat` creates the VM. Detached worker processes must also load it.
 
-## Docs
+## Commands
 
-- [docs/plan-init.md](docs/plan-init.md) — initial design and phased plan.
-- [docs/known-issues.md](docs/known-issues.md) — known issues, including monkey-patch tradeoffs and the recommended upstream fix.
+- `/chat-mount [--read-only] [--force]` — configure the current `cwd` as a VM mount for the connected conversation. If the derived mount path already points at a different host path or mode, rerun with `--force` to confirm clobbering it.
+- `/chat-unmount <name>` — remove a configured mount. `<name>` may be `foo` or `/foo`.
+- `/chat-mounts` — show configured mounts and the last VM apply result.
+
+`/chat-mount` requires a connected `pi-chat` conversation (`/chat-connect ...`).
+
+Mount names are derived as `/<repo>` after lowercasing and replacing unsafe characters with `-`. Re-running `/chat-mount` for the same repo, host path, and mode is a no-op. If the same repo mount name already exists with a different host path or mode, `/chat-mount` warns and leaves the existing mount in place; rerun with `--force` to confirm replacing it.
+
+## Applying changes
+
+Gondolin mounts are set when the VM is created. After `/chat-mount` or `/chat-unmount`, recreate the chat VM for the change to apply, for example by reconnecting or using `/chat-new`.
+
+Missing host paths are skipped at VM creation; the connection continues. Check `/chat-mounts` for skipped mounts.
+
+## Threads
+
+Thread inheritance belongs in `pi-ez-chat-threads`, not this extension. This extension owns the mount config and VM wrapper; `pi-ez-chat-threads` should copy the parent conversation's mount config when it creates a thread.
+
+Until that integration lands, configure mounts separately for thread conversations if needed.
+
+## Storage
+
+```text
+~/.pi/agent/chat-mount/
+├── mounts.json
+├── last-apply.json
+└── debug.log
+```
+
+## Development
+
+```bash
+npm install
+npm test
+npm run typecheck
+```
 
 ## License
 
-MIT (planned)
+MIT

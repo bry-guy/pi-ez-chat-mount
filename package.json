@@ -1,0 +1,46 @@
+{
+  "name": "pi-ez-chat-mount",
+  "version": "0.1.0",
+  "description": "pi extension that exposes the current pi session cwd as a sibling Gondolin mount for pi-chat.",
+  "license": "MIT",
+  "type": "module",
+  "keywords": [
+    "pi-package",
+    "pi-extension",
+    "pi-chat",
+    "gondolin"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/bry-guy/pi-ez-chat-mount.git"
+  },
+  "homepage": "https://github.com/bry-guy/pi-ez-chat-mount#readme",
+  "bugs": {
+    "url": "https://github.com/bry-guy/pi-ez-chat-mount/issues"
+  },
+  "pi": {
+    "extensions": [
+      "./index.ts"
+    ]
+  },
+  "scripts": {
+    "test": "tsx --test test.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "peerDependencies": {
+    "@earendil-works/gondolin": "*"
+  },
+  "peerDependenciesMeta": {
+    "@earendil-works/gondolin": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.21",
+    "tsx": "^4.19.4",
+    "typescript": "^5.8.3"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

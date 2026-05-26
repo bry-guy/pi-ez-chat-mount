@@ -1,6 +1,6 @@
 # pi-ez-chat-mount — initial plan
 
-Status: design/planning. No code yet.
+Status: Phase 1 initial implementation complete. Core extension scaffolding, `VM.create` wrapper, config storage, commands, and unit tests exist. Remaining items include richer user-visible chat notices/status integration, thread inheritance, and handoff deprecation docs.
 
 ## Goal
 
@@ -11,17 +11,16 @@ This must work **without modifying upstream `pi-chat`**. See [known-issues.md](k
 ## Target behavior
 
 - New extension `pi-ez-chat-mount` exposes:
-  - `/chat-mount [--read-only]`
+  - `/chat-mount [--read-only] [--force]`
   - `/chat-unmount <name>`
   - `/chat-mounts`
 - `/chat-mount`:
   - Takes no path arguments.
   - Mounts the current pi session's `cwd` into the Gondolin VM.
-  - Mount point is `/<repo>-<session_name>`:
-    - `repo` = sanitized basename of `cwd`,
-    - `session_name` = sanitized current pi session name.
-  - Fails if the current pi session has no name; instructs the user to name the session.
+  - Mount point is `/<repo>` where `repo` = sanitized basename of `cwd`.
   - Default mode is read-write. `--read-only` makes it read-only.
+  - If the same mount already points at the same host path and mode, no-op successfully.
+  - If the same mount name exists with a different host path or mode, warn and require `/chat-mount --force` before clobbering it.
 - Mounts are sibling roots to `/workspace` and `/shared`. `/workspace` semantics are not changed.
 - Mounts persist per conversation in extension-local storage and are re-applied on every VM (re)creation for that conversation.
 - If a configured mount's host path is missing at VM start: skip that mount, surface a user-visible warning, and continue connecting.
@@ -49,11 +48,11 @@ Explicitly **out of scope** for the initial implementation:
 /                       Alpine rootfs
 ├── shared/             account shared (pi-chat)
 ├── workspace/          channel-durable storage (pi-chat)
-├── infra-infra-dev/    host bind to ~/dev/infra        (pi-ez-chat-mount)
-└── bar-bar-dev/        host bind to ~/dev/bar          (pi-ez-chat-mount)
+├── infra/              host bind to ~/dev/infra        (pi-ez-chat-mount)
+└── bar/                host bind to ~/dev/bar          (pi-ez-chat-mount)
 ```
 
-The agent's cwd default stays `/workspace`. Host-mounted repos are reachable as `/infra-infra-dev` etc.
+The agent's cwd default stays `/workspace`. Host-mounted repos are reachable as `/infra` etc.
 
 Threads behave identically: a thread's VM also gets `/workspace`, `/shared`, plus the same sibling mounts inherited from its parent at thread creation.
 
@@ -105,16 +104,16 @@ See [known-issues.md](known-issues.md) for the tradeoffs of this approach and th
 
 ## Mount name derivation
 
-`/<repo>-<session_name>` where each segment is sanitized as:
+`/<repo>` where `repo` is the basename of `cwd` sanitized as:
 
 - lowercase,
 - replace any non-`[a-z0-9._-]` char with `-`,
 - collapse repeats of `-`,
 - strip leading/trailing `-`.
 
-Resulting combined name must be non-empty; otherwise fail.
+Resulting name must be non-empty; otherwise fail.
 
-If a mount with the same guest path and identical config already exists for this conversation, `/chat-mount` is a no-op success. If the guest path collides with a different config, `/chat-mount` fails with a clear error.
+If a mount with the same guest path and identical config already exists for this conversation, `/chat-mount` is a no-op success. If the guest path collides with a different config, `/chat-mount` warns and leaves the old mount in place; rerun with `--force` to confirm clobbering the existing mount.
 
 ## Restart semantics
 
@@ -130,25 +129,28 @@ If a future Gondolin version exposes hot-add, the extension can adopt it transpa
 
 ### Phase 1: extension with VM.create wrapper and core commands
 
+Implemented in this repository:
+
 1. Scaffold `pi-ez-chat-mount` package (`package.json`, `tsconfig.json`, `mise.toml`, `release-please-config.json`, `LICENSE`, `index.ts`, `src/`, `test.ts`, `README.md`).
 2. Register a one-time wrapper around `VM.create` at extension register time. Idempotent.
 3. Implement conversation identification from `VM.create` opts.
-4. Implement mount validation, merging, skipping with warning.
+4. Implement mount validation, merging, skipping with warning state in `last-apply.json` and `debug.log`.
 5. Implement `~/.pi/agent/chat-mount/mounts.json` load/save helpers.
 6. Implement mount-name derivation.
 7. Implement commands:
-   - `/chat-mount [--read-only]`
+   - `/chat-mount [--read-only] [--force]`
    - `/chat-unmount <name>`
    - `/chat-mounts`
-8. Surface notices (applied/skipped) to the user via the next chat reply.
+8. Surface command feedback and last applied/skipped state via `/chat-mounts`.
 9. Tests:
    - mount-name derivation and edge cases,
-   - rejects unnamed session,
    - wrapper merges mounts correctly against synthetic `VM.create` options,
    - skipped-when-missing behavior,
    - idempotent wrap,
-   - collision rejection,
+   - collision helper behavior,
    - conversation identification correctness.
+
+Not yet fully implemented from the original Phase 1 wishlist: injecting applied/skipped notices into the next remote chat reply, and direct unit tests around command-level replacement confirmation.
 
 ### Phase 2: status integration
 
@@ -176,13 +178,13 @@ If a future Gondolin version exposes hot-add, the extension can adopt it transpa
 
 ## Validation walkthrough (target end state)
 
-1. From `~/dev/infra` in a pi session named `infra-dev`, `/chat-connect discord-bry-guy/onlyclankers`.
-2. `/chat-mount` → VM gets `/infra-infra-dev` bound to `~/dev/infra`.
+1. From `~/dev/infra`, `/chat-connect discord-bry-guy/onlyclankers`.
+2. `/chat-mount` → VM gets `/infra` bound to `~/dev/infra`.
 3. Add `foo.md` in `~/dev/infra` (or from inside the VM); both sides see it.
-4. `/chat-thread Fix login tests` → thread conversation inherits mount `/infra-infra-dev`. Both main and thread VMs see `foo.md`.
-5. `/chat-disconnect`, `cd ~/dev/bar`, name the session `bar-dev`, `/chat-connect discord-bry-guy/onlyclankers`, `/chat-mount`.
-   - Main channel now has `/bar-bar-dev`.
-   - The thread still has `/infra-infra-dev`.
+4. `/chat-thread Fix login tests` → thread conversation inherits mount `/infra`. Both main and thread VMs see `foo.md`.
+5. `/chat-disconnect`, `cd ~/dev/bar`, `/chat-connect discord-bry-guy/onlyclankers`, `/chat-mount`.
+   - Main channel now has `/bar`.
+   - The thread still has `/infra`.
 6. In the thread VM: commit and push `foo.md`.
 7. On host: `cd ~/dev/infra && git pull`. The thread sees no change (same checkout), the host sees the committed file. If you reconnect main from `~/dev/infra` later and `/chat-mount`, main also sees the committed file.
 

@@ -1,0 +1,14 @@
+[tools]
+node = "22"
+
+[tasks.test]
+description = "Run unit tests"
+run = "npm test"
+
+[tasks.typecheck]
+description = "Run TypeScript type checking"
+run = "npm run typecheck"
+
+[tasks.check]
+description = "Run all checks"
+depends = ["typecheck", "test"]

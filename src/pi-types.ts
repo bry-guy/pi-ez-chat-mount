@@ -6,6 +6,9 @@ export type CommandContext = {
   ui: { notify(message: string, level?: NotifyLevel): void };
 };
 
+export type InputEvent = { text: string; images?: unknown[]; source?: string };
+export type InputEventResult = { action: "continue" } | { action: "handled" } | { action: "transform"; text: string; images?: unknown[] };
+
 export type ExtensionAPI = {
   getSessionName(): string | undefined;
   registerCommand(
@@ -15,4 +18,5 @@ export type ExtensionAPI = {
       handler(args: string, ctx: CommandContext): Promise<void> | void;
     },
   ): void;
+  on?(event: "input", handler: (event: InputEvent, ctx: CommandContext) => Promise<InputEventResult> | InputEventResult): void;
 };

@@ -7,6 +7,9 @@ import { sanitizeSegment, deriveGuestPath, normalizeUnmountName } from "./src/mo
 import { conversationIdFromWorkspaceHostPath, identifyConversation } from "./src/conversation.js";
 import { equalMount, partitionMounts, validateGuestPath } from "./src/validate.js";
 import { applyConfiguredMounts, installVmCreateWrapper } from "./src/wrapper.js";
+import { matchSlashCommand, stripLeadingMention } from "./src/match.js";
+import { parseRepoSpec } from "./src/repo-spec.js";
+import { normalizeConfig } from "./src/config.js";
 import type { MountStore, VmCreateOptionsLike } from "./src/types.js";
 
 test("sanitizes mount path segments", () => {
@@ -15,6 +18,29 @@ test("sanitizes mount path segments", () => {
   assert.equal(deriveGuestPath("/Users/me/Infra Repo"), "/infra-repo");
   assert.equal(normalizeUnmountName("foo"), "/foo");
   assert.equal(normalizeUnmountName("/foo"), "/foo");
+});
+
+test("matches slash commands after leading bot mentions", () => {
+  assert.equal(stripLeadingMention("  @bot /chat-thread hi"), "/chat-thread hi");
+  assert.deepEqual(matchSlashCommand("<@123> /chat-mount bry-guy/pi-ez-chat-mount", ["chat-mount"]), {
+    name: "chat-mount",
+    args: "bry-guy/pi-ez-chat-mount",
+  });
+  assert.equal(matchSlashCommand("@bot hello", ["chat-mount"]), undefined);
+});
+
+test("parses repository specs", () => {
+  assert.deepEqual(parseRepoSpec("bry-guy/pi-ez-chat-mount"), {
+    input: "bry-guy/pi-ez-chat-mount",
+    cloneUrl: "git@github.com:bry-guy/pi-ez-chat-mount.git",
+    repoName: "pi-ez-chat-mount",
+    ref: undefined,
+    display: "bry-guy/pi-ez-chat-mount",
+  });
+  assert.equal(parseRepoSpec("https://github.com/bry-guy/pi-ez-chat-mount.git#main")?.repoName, "pi-ez-chat-mount");
+  assert.equal(parseRepoSpec("git@github.com:bry-guy/pi-ez-chat-mount.git")?.cloneUrl, "git@github.com:bry-guy/pi-ez-chat-mount.git");
+  assert.equal(parseRepoSpec("not-a-repo"), undefined);
+  assert.equal(normalizeConfig({ sourceDir: "~/dev", cloneMode: "shallow" }).cloneMode, "shallow");
 });
 
 test("validates guest paths", () => {

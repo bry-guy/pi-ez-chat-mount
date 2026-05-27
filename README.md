@@ -20,17 +20,19 @@ Load this extension before `pi-chat` creates the VM. Detached worker processes m
 
 ## Commands
 
-- `/chat-mount [--read-only] [--force]` — configure the current `cwd` as a VM mount for the connected conversation. If the derived mount path already points at a different host path or mode, rerun with `--force` to confirm clobbering it.
+- `/chat-mount [--read-only] [--force]` — configure the current `cwd` as a VM mount for the connected conversation.
+- `/chat-mount <repo-url|owner/repo> [--read-only] [--force] [--update] [--source-dir <dir>]` — clone a remote repo on the host if needed, then mount that checkout. Explicit URLs are preserved; `owner/repo` uses GitHub SSH (`git@github.com:owner/repo.git`). The default source directory is `~/dev` or `PI_EZ_CHAT_MOUNT_SOURCE_DIR`.
 - `/chat-unmount <name>` — remove a configured mount. `<name>` may be `foo` or `/foo`.
 - `/chat-mounts` — show configured mounts and the last VM apply result.
+- `/chat-reload` — explains the current reload fallback. pi-chat handles `/new` before extension hooks run, so the real reload command remains `@bot /new` in chat.
 
-`/chat-mount` requires a connected `pi-chat` conversation (`/chat-connect ...`).
+`/chat-mount` requires a connected `pi-chat` conversation (`/chat-connect ...`). The commands also work from pi-chat itself, including mention-only channels: `@bot /chat-mount bry-guy/pi-ez-chat-mount`, `@bot /chat-unmount pi-ez-chat-mount`, and `@bot /chat-mounts`.
 
 Mount names are derived as `/<repo>` after lowercasing and replacing unsafe characters with `-`. Re-running `/chat-mount` for the same repo, host path, and mode is a no-op. If the same repo mount name already exists with a different host path or mode, `/chat-mount` warns and leaves the existing mount in place; rerun with `--force` to confirm replacing it.
 
 ## Applying changes
 
-Gondolin mounts are set when the VM is created. After `/chat-mount` or `/chat-unmount`, recreate the chat VM for the change to apply, for example by reconnecting or using `/chat-new`.
+Gondolin mounts are set when the VM is created. After `/chat-mount` or `/chat-unmount`, recreate the chat VM for the change to apply by sending `@bot /new` in the chat channel. pi-chat currently parses `/new` before extension input hooks run, so this extension cannot force-restart the active VM from inside the VM; it returns an explicit reload hint after changes.
 
 Missing host paths are skipped at VM creation; the connection continues. Check `/chat-mounts` for skipped mounts.
 
@@ -44,6 +46,7 @@ Until that integration lands, configure mounts separately for thread conversatio
 
 ```text
 ~/.pi/agent/chat-mount/
+├── config.json      # sourceDir / cloneMode
 ├── mounts.json
 ├── last-apply.json
 └── debug.log

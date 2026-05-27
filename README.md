@@ -26,7 +26,7 @@ Load this extension before `pi-chat` creates the VM. Detached worker processes m
 - `/chat-mounts` — show configured mounts and the last VM apply result.
 - `/chat-reload` — explains the current reload fallback. pi-chat handles `/new` before extension hooks run, so the real reload command remains `@bot /new` in chat.
 
-`/chat-mount` requires a connected `pi-chat` conversation (`/chat-connect ...`). The commands also work from pi-chat itself, including mention-only channels: `@bot /chat-mount bry-guy/pi-ez-chat-mount`, `@bot /chat-unmount pi-ez-chat-mount`, and `@bot /chat-mounts`.
+`/chat-mount` requires a connected `pi-chat` conversation (`/chat-connect ...`). The commands also work from pi-chat itself, including mention-only channels: `@bot /chat-mount bry-guy/pi-ez-chat-mount`, `/chat-mount bry-guy/pi-ez-chat-mount @bot`, and `@bot /chat-mounts`. Transcript-shaped forwarded lines such as `- [time] [uid:...] user: <@bot> /chat-mount ...` are also recognized.
 
 Mount names are derived as `/<repo>` after lowercasing and replacing unsafe characters with `-`. Re-running `/chat-mount` for the same repo, host path, and mode is a no-op. If the same repo mount name already exists with a different host path or mode, `/chat-mount` warns and leaves the existing mount in place; rerun with `--force` to confirm replacing it.
 

@@ -7,7 +7,7 @@ import { sanitizeSegment, deriveGuestPath, normalizeUnmountName } from "./src/mo
 import { conversationIdFromWorkspaceHostPath, identifyConversation } from "./src/conversation.js";
 import { equalMount, partitionMounts, validateGuestPath } from "./src/validate.js";
 import { applyConfiguredMounts, installVmCreateWrapper } from "./src/wrapper.js";
-import { matchSlashCommand, stripLeadingMention } from "./src/match.js";
+import { matchSlashCommand, normalizeRemoteCommandText, stripLeadingMention } from "./src/match.js";
 import { parseRepoSpec } from "./src/repo-spec.js";
 import { normalizeConfig } from "./src/config.js";
 import type { MountStore, VmCreateOptionsLike } from "./src/types.js";
@@ -26,6 +26,19 @@ test("matches slash commands after leading bot mentions", () => {
     name: "chat-mount",
     args: "bry-guy/pi-ez-chat-mount",
   });
+  assert.deepEqual(matchSlashCommand("/chat-mount bry-guy/pi-ez-chat-mount <@123>", ["chat-mount"]), {
+    name: "chat-mount",
+    args: "bry-guy/pi-ez-chat-mount",
+  });
+  assert.deepEqual(matchSlashCommand("- [2026-05-27T12:00:00.000Z] [uid:123] prettybry: <@1496> /chat-mount bry-guy/pi-ez-chat-mount", ["chat-mount"]), {
+    name: "chat-mount",
+    args: "bry-guy/pi-ez-chat-mount",
+  });
+  assert.deepEqual(matchSlashCommand("- [2026-05-27T12:00:00.000Z] [uid:123] prettybry: /chat-mount bry-guy/pi-ez-chat-mount <@1496>", ["chat-mount"]), {
+    name: "chat-mount",
+    args: "bry-guy/pi-ez-chat-mount",
+  });
+  assert.equal(normalizeRemoteCommandText("- [2026-05-27T12:00:00.000Z] [uid:123] prettybry: hello"), "hello");
   assert.equal(matchSlashCommand("@bot hello", ["chat-mount"]), undefined);
 });
 

@@ -9,7 +9,6 @@ import { conversationIdFromWorkspaceHostPath, identifyConversation } from "./src
 import { equalMount, partitionMounts, validateGuestPath } from "./src/validate.js";
 import { applyConfiguredMounts, installVmCreateWrapper } from "./src/wrapper.js";
 import { matchSlashCommand, normalizeRemoteCommandText, stripLeadingMention } from "./src/match.js";
-import { parseRepoSpec } from "./src/repo-spec.js";
 import { parseMountTarget } from "./src/target.js";
 import { normalizeConfig } from "./src/config.js";
 import { resolveTargetHostPath } from "./src/resolve.js";
@@ -65,8 +64,6 @@ test("parses mount targets", () => {
   assert.equal(parseMountTarget("git@gitlab.example:group/sub/project.git")?.slug, "project");
   assert.equal(parseMountTarget("bry-guy/pi-ez-chat-mount", "gitlab")?.cloneUrl, "git@gitlab.com:bry-guy/pi-ez-chat-mount.git");
 
-  assert.equal(parseRepoSpec("bry-guy/pi-ez-chat-mount")?.repoName, "pi-ez-chat-mount");
-  assert.equal(parseRepoSpec("not-a-repo"), undefined);
   assert.equal(normalizeConfig({ sourceDir: "~/dev", cloneMode: "shallow", defaultForge: "gitlab" }).cloneMode, "shallow");
   assert.equal(normalizeConfig({ sourceDirs: ["~/dev"] }).sourceDir.endsWith("/dev"), true);
 });

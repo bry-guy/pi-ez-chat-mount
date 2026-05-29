@@ -6,7 +6,9 @@ import { loadMountStore, readLastApply, saveMountStore } from "./src/storage.js"
 import { CONFIG_JSON_PATH, MOUNTS_JSON_PATH } from "./src/paths.js";
 import { tryInstallRuntimeWrapper } from "./src/wrapper.js";
 import { matchSlashCommand } from "./src/match.js";
+import { getDiscordConversationTarget } from "./src/chat-config.js";
 import { loadConfig } from "./src/config.js";
+import { sendDiscordMessage } from "./src/discord.js";
 import { parseMountTarget, type MountTarget } from "./src/target.js";
 import { resolveCurrentRepoHostPath, resolveTargetHostPath } from "./src/resolve.js";
 import { scheduleCurrentTmuxPaneRespawn } from "./src/restart.js";
@@ -166,10 +168,20 @@ function fenced(text: string): string {
   return `\`\`\`\n${text.replace(/```/g, "`​``")}\n\`\`\``;
 }
 
-function remoteResult(command: string, result: CommandResult) {
+async function remoteResult(command: string, result: CommandResult, ctx: CommandContext) {
   let suffix = reloadHint(result.changed ?? false);
   if (result.changed) {
-    const restart = scheduleCurrentTmuxPaneRespawn();
+    const conversationId = getPersistedConversationId(ctx);
+    const target = conversationId ? await getDiscordConversationTarget(conversationId).catch(() => undefined) : undefined;
+    if (target) {
+      // Direct Discord delivery avoids racing the command response against the worker
+      // respawn that is required to recreate the Gondolin VM with updated mounts.
+      await sendDiscordMessage(target, fenced(`${result.message}\n\nRestarting Gondolin VM.`));
+      const restart = scheduleCurrentTmuxPaneRespawn();
+      if (!restart.scheduled) await sendDiscordMessage(target, fenced(`${result.message}\n\n${restart.message}`)).catch(() => undefined);
+      return { action: "handled" as const };
+    }
+    const restart = scheduleCurrentTmuxPaneRespawn(3);
     suffix = `\n\n${restart.message}`;
   }
   return {
@@ -240,10 +252,10 @@ export default async function (pi: ExtensionAPI) {
     const match = matchSlashCommand(event.text, ["chat-mount", "chat-unmount", "chat-unmount-all", "chat-mounts"]);
     if (!match) return { action: "continue" };
     try {
-      if (match.name === "chat-mount") return remoteResult(match.name, await chatMount(match.args, ctx));
-      if (match.name === "chat-unmount") return remoteResult(match.name, await chatUnmount(match.args, ctx));
-      if (match.name === "chat-unmount-all") return remoteResult(match.name, await chatUnmountAll(ctx));
-      return remoteResult(match.name, await chatMounts(ctx, wrapper));
+      if (match.name === "chat-mount") return remoteResult(match.name, await chatMount(match.args, ctx), ctx);
+      if (match.name === "chat-unmount") return remoteResult(match.name, await chatUnmount(match.args, ctx), ctx);
+      if (match.name === "chat-unmount-all") return remoteResult(match.name, await chatUnmountAll(ctx), ctx);
+      return remoteResult(match.name, await chatMounts(ctx, wrapper), ctx);
     } catch (error) {
       return remoteError(match.name, error);
     }

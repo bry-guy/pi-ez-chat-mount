@@ -1,6 +1,6 @@
 {
   "name": "pi-ez-chat-mount",
-  "version": "0.2.2",
+  "version": "0.2.3",
   "description": "pi extension that exposes the current pi session cwd as a sibling Gondolin mount for pi-chat.",
   "license": "MIT",
   "type": "module",
@@ -44,6 +44,6 @@
     "node": ">=20"
   },
   "dependencies": {
-    "pi-ez-lib": "https://github.com/bry-guy/pi-ez-lib/archive/refs/tags/v0.1.4.tar.gz"
+    "pi-ez-lib": "https://github.com/bry-guy/pi-ez-lib/archive/refs/tags/v0.1.5.tar.gz"
   }
 }

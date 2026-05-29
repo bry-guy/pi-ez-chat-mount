@@ -41,7 +41,9 @@ Mount names are derived as `/<repo>` after lowercasing and replacing unsafe char
 
 ## Applying changes
 
-Gondolin mounts are set when the VM is created. After `/chat-mount` or `/chat-unmount`, recreate the chat VM for the change to apply by sending `@bot /new` in the chat channel. pi-chat currently parses `/new` before extension input hooks run, so this extension cannot force-restart the active VM from inside the VM; it returns an explicit reload hint after changes.
+Gondolin mounts are set when the VM is created. After `/chat-mount` or `/chat-unmount`, the Gondolin VM must be restarted for the change to apply.
+
+When run remotely from pi-chat/Discord, this extension schedules a tmux pane respawn after a short delay. That restarts the current pi-chat worker with the same session and conversation, reloading extensions and creating a fresh Gondolin VM with the updated mounts. When run from a local pi command, it prints `Gondolin VM must be restarted.`
 
 Missing host paths are skipped at VM creation; the connection continues. Check `/chat-mounts` for skipped mounts.
 

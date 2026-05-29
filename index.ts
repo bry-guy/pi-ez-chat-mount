@@ -9,6 +9,7 @@ import { matchSlashCommand } from "./src/match.js";
 import { loadConfig } from "./src/config.js";
 import { parseMountTarget, type MountTarget } from "./src/target.js";
 import { resolveCurrentRepoHostPath, resolveTargetHostPath } from "./src/resolve.js";
+import { scheduleCurrentTmuxPaneRespawn } from "./src/restart.js";
 import type { MountEntry, MountMode } from "./src/types.js";
 
 type CommandResult = { message: string; level?: NotifyLevel; changed?: boolean };
@@ -59,7 +60,7 @@ function parseMountArgs(args: string): MountArgs {
 
 function reloadHint(changed: boolean): string {
   if (!changed) return "";
-  return "\n\nReload required: send @bot /new in the chat channel to recreate the pi-chat sandbox. pi-chat handles /new before extension input hooks run, so this cannot be done from inside the VM.";
+  return "\n\nGondolin VM must be restarted.";
 }
 
 async function resolveMountHostPath(args: MountArgs, ctx: CommandContext): Promise<{ hostPath: string; resolutionMessage?: string }> {
@@ -162,9 +163,14 @@ async function chatMounts(ctx: CommandContext, wrapper: Awaited<ReturnType<typeo
 }
 
 function remoteResult(command: string, result: CommandResult) {
+  let suffix = reloadHint(result.changed ?? false);
+  if (result.changed) {
+    const restart = scheduleCurrentTmuxPaneRespawn();
+    suffix = `\n\n${restart.message}`;
+  }
   return {
     action: "transform" as const,
-    text: `The remote /${command} command completed. Reply to the user with this result exactly:\n\n${result.message}${reloadHint(result.changed ?? false)}`,
+    text: `The remote /${command} command completed. Reply to the user with this result exactly:\n\n${result.message}${suffix}`,
   };
 }
 

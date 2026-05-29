@@ -12,6 +12,7 @@ Status: implemented in 0.2.0.
 6. **Dropped `--update`**: users manage repo state from inside the VM via normal `git fetch` / `git pull`.
 7. **Added `/chat-unmount-all`**: clear all mounts for the connected conversation.
 8. **`/chat-mounts`** now distinguishes "configured for next VM reload" from "active in VM (snapshot from last `VM.create`)".
+9. **Remote auto-restart**: remote mount changes schedule a tmux pane respawn, which restarts the current pi-chat worker and creates a fresh Gondolin VM with updated mounts.
 
 ## Target shapes
 

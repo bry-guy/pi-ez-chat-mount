@@ -162,6 +162,10 @@ async function chatMounts(ctx: CommandContext, wrapper: Awaited<ReturnType<typeo
   return { message: lines.join("\n") };
 }
 
+function fenced(text: string): string {
+  return `\`\`\`\n${text.replace(/```/g, "`​``")}\n\`\`\``;
+}
+
 function remoteResult(command: string, result: CommandResult) {
   let suffix = reloadHint(result.changed ?? false);
   if (result.changed) {
@@ -170,14 +174,14 @@ function remoteResult(command: string, result: CommandResult) {
   }
   return {
     action: "transform" as const,
-    text: `The remote /${command} command completed. Reply to the user with this result exactly:\n\n${result.message}${suffix}`,
+    text: `The remote /${command} command completed. Reply to the user with exactly this fenced code block and no other text:\n\n${fenced(`${result.message}${suffix}`)}`,
   };
 }
 
 function remoteError(command: string, error: unknown) {
   return {
     action: "transform" as const,
-    text: `The remote /${command} command failed. Reply to the user with this error:\n\n${error instanceof Error ? error.message : String(error)}`,
+    text: `The remote /${command} command failed. Reply to the user with exactly this fenced code block and no other text:\n\n${fenced(error instanceof Error ? error.message : String(error))}`,
   };
 }
 

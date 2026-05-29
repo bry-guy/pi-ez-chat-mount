@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { mkdir } from "node:fs/promises";
 import { mkdtemp } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
@@ -9,7 +10,9 @@ import { equalMount, partitionMounts, validateGuestPath } from "./src/validate.j
 import { applyConfiguredMounts, installVmCreateWrapper } from "./src/wrapper.js";
 import { matchSlashCommand, normalizeRemoteCommandText, stripLeadingMention } from "./src/match.js";
 import { parseRepoSpec } from "./src/repo-spec.js";
+import { parseMountTarget } from "./src/target.js";
 import { normalizeConfig } from "./src/config.js";
+import { resolveTargetHostPath } from "./src/resolve.js";
 import type { MountStore, VmCreateOptionsLike } from "./src/types.js";
 
 test("sanitizes mount path segments", () => {
@@ -42,18 +45,53 @@ test("matches slash commands after leading bot mentions", () => {
   assert.equal(matchSlashCommand("@bot hello", ["chat-mount"]), undefined);
 });
 
-test("parses repository specs", () => {
-  assert.deepEqual(parseRepoSpec("bry-guy/pi-ez-chat-mount"), {
+test("parses mount targets", () => {
+  assert.deepEqual(parseMountTarget("pi-ez-chat-mount"), {
+    input: "pi-ez-chat-mount",
+    kind: "name",
+    slug: "pi-ez-chat-mount",
+    ref: undefined,
+    display: "pi-ez-chat-mount",
+  });
+  assert.deepEqual(parseMountTarget("bry-guy/pi-ez-chat-mount"), {
     input: "bry-guy/pi-ez-chat-mount",
+    kind: "shorthand",
+    slug: "pi-ez-chat-mount",
     cloneUrl: "git@github.com:bry-guy/pi-ez-chat-mount.git",
-    repoName: "pi-ez-chat-mount",
     ref: undefined,
     display: "bry-guy/pi-ez-chat-mount",
   });
-  assert.equal(parseRepoSpec("https://github.com/bry-guy/pi-ez-chat-mount.git#main")?.repoName, "pi-ez-chat-mount");
-  assert.equal(parseRepoSpec("git@github.com:bry-guy/pi-ez-chat-mount.git")?.cloneUrl, "git@github.com:bry-guy/pi-ez-chat-mount.git");
+  assert.equal(parseMountTarget("https://github.com/bry-guy/pi-ez-chat-mount.git#main")?.slug, "pi-ez-chat-mount");
+  assert.equal(parseMountTarget("git@gitlab.example:group/sub/project.git")?.slug, "project");
+  assert.equal(parseMountTarget("bry-guy/pi-ez-chat-mount", "gitlab")?.cloneUrl, "git@gitlab.com:bry-guy/pi-ez-chat-mount.git");
+
+  assert.equal(parseRepoSpec("bry-guy/pi-ez-chat-mount")?.repoName, "pi-ez-chat-mount");
   assert.equal(parseRepoSpec("not-a-repo"), undefined);
-  assert.equal(normalizeConfig({ sourceDir: "~/dev", cloneMode: "shallow" }).cloneMode, "shallow");
+  assert.equal(normalizeConfig({ sourceDir: "~/dev", cloneMode: "shallow", defaultForge: "gitlab" }).cloneMode, "shallow");
+  assert.equal(normalizeConfig({ sourceDirs: ["~/dev"] }).sourceDir.endsWith("/dev"), true);
+});
+
+test("resolves bare names from source dir and rejects missing names", async () => {
+  const source = await mkdtemp(join(tmpdir(), "chat-mount-source-"));
+  const repo = join(source, "pi-ez-chat-mount");
+  await mkdir(repo);
+  const ctx = { cwd: source } as any;
+  const found = await resolveTargetHostPath("pi-ez-chat-mount", ctx, { force: false, sourceDir: source });
+  assert.equal(found.hostPath, repo);
+  await assert.rejects(
+    () => resolveTargetHostPath("missing-repo", ctx, { force: false, sourceDir: source }),
+    /Did you mean to specify a repo URL/,
+  );
+});
+
+test("shorthand targets prefer an existing source-dir sibling", async () => {
+  const source = await mkdtemp(join(tmpdir(), "chat-mount-source-"));
+  const repo = join(source, "pi-ez-chat-mount");
+  await mkdir(repo);
+  const ctx = { cwd: source } as any;
+  const found = await resolveTargetHostPath("bry-guy/pi-ez-chat-mount", ctx, { force: false, sourceDir: source });
+  assert.equal(found.hostPath, repo);
+  assert.match(found.message ?? "", /already exists in source/);
 });
 
 test("validates guest paths", () => {

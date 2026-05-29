@@ -1,5 +1,4 @@
 import type { CommandContext, ExtensionAPI, NotifyLevel } from "./src/pi-types.js";
-import { resolve } from "node:path";
 import { deriveGuestPath, normalizeUnmountName } from "./src/mount-name.js";
 import { getPersistedConversationId } from "./src/conversation.js";
 import { equalMount } from "./src/validate.js";
@@ -8,8 +7,8 @@ import { CONFIG_JSON_PATH, MOUNTS_JSON_PATH } from "./src/paths.js";
 import { tryInstallRuntimeWrapper } from "./src/wrapper.js";
 import { matchSlashCommand } from "./src/match.js";
 import { loadConfig } from "./src/config.js";
-import { ensureRepoClone } from "./src/clone.js";
-import { parseRepoSpec, type RepoSpec } from "./src/repo-spec.js";
+import { parseMountTarget, type MountTarget } from "./src/target.js";
+import { resolveCurrentRepoHostPath, resolveTargetHostPath } from "./src/resolve.js";
 import type { MountEntry, MountMode } from "./src/types.js";
 
 type CommandResult = { message: string; level?: NotifyLevel; changed?: boolean };
@@ -17,9 +16,10 @@ type CommandResult = { message: string; level?: NotifyLevel; changed?: boolean }
 type MountArgs = {
   mode: MountMode;
   force: boolean;
-  update: boolean;
   sourceDir?: string;
-  repo?: RepoSpec;
+  forge?: string;
+  target?: MountTarget;
+  rawTarget?: string;
 };
 
 function notice(ctx: { ui: { notify(message: string, level?: NotifyLevel): void } }, message: string, level: NotifyLevel = "info") {
@@ -39,21 +39,21 @@ function tokenize(raw: string): string[] {
 function parseMountArgs(args: string): MountArgs {
   const tokens = tokenize(args);
   const positional: string[] = [];
-  const parsed: MountArgs = { mode: "rw", force: false, update: false };
+  const parsed: MountArgs = { mode: "rw", force: false };
   for (let i = 0; i < tokens.length; i++) {
     const token = tokens[i];
     if (token === "--read-only") parsed.mode = "ro";
     else if (token === "--force") parsed.force = true;
-    else if (token === "--update") parsed.update = true;
     else if (token === "--source-dir") parsed.sourceDir = tokens[++i];
     else if (token.startsWith("--source-dir=")) parsed.sourceDir = token.slice("--source-dir=".length);
-    else if (token.startsWith("-")) throw new Error("Usage: /chat-mount [repo-url|owner/repo] [--read-only] [--force] [--update] [--source-dir <dir>]");
+    else if (token === "--forge") parsed.forge = tokens[++i];
+    else if (token.startsWith("--forge=")) parsed.forge = token.slice("--forge=".length);
+    else if (token === "--update") throw new Error("--update has been removed; manage repository state with git from inside the mounted VM.");
+    else if (token.startsWith("-")) throw new Error("Usage: /chat-mount [repo-name|owner/repo|repo-url] [--read-only] [--force] [--forge github|gitlab|bitbucket] [--source-dir <dir>]");
     else positional.push(token);
   }
-  if (positional.length > 1) throw new Error("Usage: /chat-mount [repo-url|owner/repo] [--read-only] [--force] [--update] [--source-dir <dir>]");
-  parsed.repo = positional[0] ? parseRepoSpec(positional[0]) : undefined;
-  if (positional[0] && !parsed.repo) throw new Error(`Not a supported repository spec: ${positional[0]}`);
-  if (parsed.update && !parsed.repo) throw new Error("--update only applies when mounting a repository spec");
+  if (positional.length > 1) throw new Error("Usage: /chat-mount [repo-name|owner/repo|repo-url] [--read-only] [--force] [--forge github|gitlab|bitbucket] [--source-dir <dir>]");
+  parsed.rawTarget = positional[0];
   return parsed;
 }
 
@@ -62,25 +62,38 @@ function reloadHint(changed: boolean): string {
   return "\n\nReload required: send @bot /new in the chat channel to recreate the pi-chat sandbox. pi-chat handles /new before extension input hooks run, so this cannot be done from inside the VM.";
 }
 
-async function resolveMountHostPath(args: MountArgs, ctx: CommandContext): Promise<{ hostPath: string; cloneMessage?: string }> {
-  if (!args.repo) return { hostPath: resolve(ctx.cwd) };
+async function resolveMountHostPath(args: MountArgs, ctx: CommandContext): Promise<{ hostPath: string; resolutionMessage?: string }> {
+  const resolved = args.rawTarget
+    ? await resolveTargetHostPath(args.rawTarget, ctx, { force: args.force, sourceDir: args.sourceDir, forge: args.forge })
+    : await resolveCurrentRepoHostPath(ctx);
+  return { hostPath: resolved.hostPath, resolutionMessage: resolved.message };
+}
+
+async function resolveUnmountGuestPath(raw: string, ctx: CommandContext): Promise<string> {
+  const trimmed = raw.trim();
+  if (!trimmed) {
+    const current = await resolveCurrentRepoHostPath(ctx);
+    return deriveGuestPath(current.hostPath);
+  }
+  if (trimmed.startsWith("/")) return normalizeUnmountName(trimmed);
+
   const config = await loadConfig(undefined, ctx.cwd);
-  if (args.sourceDir) config.sourceDir = resolve(args.sourceDir.replace(/^~(?=$|\/)/, process.env.HOME ?? "~"));
-  const clone = await ensureRepoClone(args.repo, config, { force: args.force, update: args.update });
-  return { hostPath: clone.hostPath, cloneMessage: clone.message };
+  const target = parseMountTarget(trimmed, config.defaultForge);
+  if (!target) return normalizeUnmountName(trimmed);
+  return `/${target.slug.toLowerCase().replace(/[^a-z0-9._-]+/g, "-").replace(/-+/g, "-").replace(/^-+|-+$/g, "")}`;
 }
 
 async function chatMount(raw: string, ctx: CommandContext): Promise<CommandResult> {
   const args = parseMountArgs(raw);
   const conversationId = requireConversationId(ctx);
-  const { hostPath, cloneMessage } = await resolveMountHostPath(args, ctx);
+  const { hostPath, resolutionMessage } = await resolveMountHostPath(args, ctx);
   const guestPath = deriveGuestPath(hostPath);
   const entry: MountEntry = { hostPath, mode: args.mode };
   const store = await loadMountStore();
   const existing = store[conversationId]?.[guestPath];
   if (existing) {
     if (equalMount(existing, entry)) {
-      return { message: `${guestPath} is already configured for ${conversationId}.${cloneMessage ? `\n${cloneMessage}` : ""}` };
+      return { message: `${guestPath} is already configured for ${conversationId}.${resolutionMessage ? `\n${resolutionMessage}` : ""}` };
     }
     if (!args.force) {
       return {
@@ -99,19 +112,29 @@ async function chatMount(raw: string, ctx: CommandContext): Promise<CommandResul
     changed: true,
     message:
       `${existing ? "Replaced" : "Configured"} ${guestPath} -> ${hostPath} (${args.mode}) for ${conversationId}.` +
-      `${cloneMessage ? `\n${cloneMessage}` : ""}`,
+      `${resolutionMessage ? `\n${resolutionMessage}` : ""}`,
   };
 }
 
 async function chatUnmount(raw: string, ctx: CommandContext): Promise<CommandResult> {
   const conversationId = requireConversationId(ctx);
-  const guestPath = normalizeUnmountName(raw);
+  const guestPath = await resolveUnmountGuestPath(raw, ctx);
   const store = await loadMountStore();
   if (!store[conversationId]?.[guestPath]) return { level: "warning", message: `No configured mount ${guestPath} for ${conversationId}.` };
   delete store[conversationId][guestPath];
   if (Object.keys(store[conversationId]).length === 0) delete store[conversationId];
   await saveMountStore(store);
   return { changed: true, message: `Removed ${guestPath} for ${conversationId}.` };
+}
+
+async function chatUnmountAll(ctx: CommandContext): Promise<CommandResult> {
+  const conversationId = requireConversationId(ctx);
+  const store = await loadMountStore();
+  const count = Object.keys(store[conversationId] ?? {}).length;
+  if (count === 0) return { level: "warning", message: `No configured mounts for ${conversationId}.` };
+  delete store[conversationId];
+  await saveMountStore(store);
+  return { changed: true, message: `Removed ${count} configured mount${count === 1 ? "" : "s"} for ${conversationId}.` };
 }
 
 async function chatMounts(ctx: CommandContext, wrapper: Awaited<ReturnType<typeof tryInstallRuntimeWrapper>>): Promise<CommandResult> {
@@ -124,14 +147,14 @@ async function chatMounts(ctx: CommandContext, wrapper: Awaited<ReturnType<typeo
   lines.push(`VM.create wrapper: ${wrapper.error ? `not installed (${wrapper.error})` : wrapper.installed ? "installed" : "already installed"}`);
   for (const id of ids) {
     const mounts = store[id] ?? {};
-    lines.push(`\n${id}:`);
+    lines.push(`\nconfigured for next VM reload — ${id}:`);
     const entries = Object.entries(mounts);
     if (entries.length === 0) lines.push("  (no configured mounts)");
     for (const [guestPath, mount] of entries) lines.push(`  ${guestPath} -> ${mount.hostPath} (${mount.mode})`);
   }
   const last = await readLastApply();
   if (last && (!conversationId || last.conversationId === conversationId)) {
-    lines.push(`\nlast VM apply for ${last.conversationId} at ${last.at}:`);
+    lines.push(`\nactive in current/last VM snapshot for ${last.conversationId} at ${last.at}:`);
     lines.push(`  applied: ${last.applied.map((m) => m.guestPath).join(", ") || "none"}`);
     lines.push(`  skipped: ${last.skipped.map((m) => `${m.guestPath} (${m.reason})`).join(", ") || "none"}`);
   }
@@ -179,6 +202,18 @@ export default async function (pi: ExtensionAPI) {
     },
   });
 
+  pi.registerCommand("chat-unmount-all", {
+    description: "Remove every configured pi-chat sibling mount for the connected conversation",
+    handler: async (_args, ctx) => {
+      try {
+        const result = await chatUnmountAll(ctx);
+        notice(ctx, `${result.message}${reloadHint(result.changed ?? false)}`, result.level);
+      } catch (error) {
+        notice(ctx, error instanceof Error ? error.message : String(error), "error");
+      }
+    },
+  });
+
   pi.registerCommand("chat-mounts", {
     description: "List configured and last-applied pi-chat sibling mounts",
     handler: async (_args, ctx) => {
@@ -192,11 +227,12 @@ export default async function (pi: ExtensionAPI) {
   });
 
   pi.on?.("input", async (event, ctx) => {
-    const match = matchSlashCommand(event.text, ["chat-mount", "chat-unmount", "chat-mounts"]);
+    const match = matchSlashCommand(event.text, ["chat-mount", "chat-unmount", "chat-unmount-all", "chat-mounts"]);
     if (!match) return { action: "continue" };
     try {
       if (match.name === "chat-mount") return remoteResult(match.name, await chatMount(match.args, ctx));
       if (match.name === "chat-unmount") return remoteResult(match.name, await chatUnmount(match.args, ctx));
+      if (match.name === "chat-unmount-all") return remoteResult(match.name, await chatUnmountAll(ctx));
       return remoteResult(match.name, await chatMounts(ctx, wrapper));
     } catch (error) {
       return remoteError(match.name, error);

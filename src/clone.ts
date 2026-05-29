@@ -2,21 +2,19 @@ import { mkdir, rm, stat } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { spawn } from "node:child_process";
 import type { ChatMountConfig } from "./config.js";
-import type { RepoSpec } from "./repo-spec.js";
+import type { MountTarget } from "./target.js";
 
 export type CloneOptions = {
   force: boolean;
-  update: boolean;
 };
 
 export type CloneResult = {
   hostPath: string;
   cloned: boolean;
-  updated: boolean;
   message: string;
 };
 
-async function pathExists(path: string): Promise<boolean> {
+export async function pathExists(path: string): Promise<boolean> {
   try {
     await stat(path);
     return true;
@@ -26,7 +24,7 @@ async function pathExists(path: string): Promise<boolean> {
   }
 }
 
-function runGit(args: string[], cwd?: string): Promise<string> {
+export function runGit(args: string[], cwd?: string): Promise<string> {
   return new Promise((resolvePromise, reject) => {
     const child = spawn("git", args, { cwd, stdio: ["ignore", "pipe", "pipe"] });
     let stdout = "";
@@ -41,44 +39,40 @@ function runGit(args: string[], cwd?: string): Promise<string> {
   });
 }
 
-function sameOrigin(actual: string, expected: string): boolean {
-  const trim = (v: string) => v.replace(/\.git$/i, "").replace(/^https:\/\/github\.com\//i, "git@github.com:");
-  return trim(actual) === trim(expected);
+export function sameOrigin(actual: string, expected: string): boolean {
+  const normalize = (value: string) => value
+    .trim()
+    .replace(/\.git$/i, "")
+    .replace(/^https:\/\/github\.com\//i, "git@github.com:")
+    .replace(/^https:\/\/gitlab\.com\//i, "git@gitlab.com:")
+    .replace(/^https:\/\/bitbucket\.org\//i, "git@bitbucket.org:");
+  return normalize(actual) === normalize(expected);
 }
 
-export async function ensureRepoClone(spec: RepoSpec, config: ChatMountConfig, options: CloneOptions): Promise<CloneResult> {
+export async function ensureRepoClone(target: MountTarget, config: ChatMountConfig, options: CloneOptions): Promise<CloneResult> {
+  if (!target.cloneUrl) throw new Error(`Cannot clone bare repository name ${target.display}; did you mean to specify a repo URL?`);
+
   const sourceDir = resolve(config.sourceDir);
-  const destination = join(sourceDir, spec.repoName);
+  const destination = join(sourceDir, target.slug);
   if (!destination.startsWith(`${sourceDir}/`) && destination !== sourceDir) throw new Error(`Refusing unsafe clone destination: ${destination}`);
 
   await mkdir(sourceDir, { recursive: true });
   const exists = await pathExists(destination);
   if (exists) {
-    let origin = "";
-    try {
-      origin = await runGit(["config", "--get", "remote.origin.url"], destination);
-    } catch {
-      throw new Error(`Clone destination already exists and is not a git repository with origin: ${destination}`);
-    }
-    if (!sameOrigin(origin, spec.cloneUrl) && !options.force) {
-      throw new Error(`Clone destination ${destination} already has origin ${origin}; refusing to treat it as ${spec.cloneUrl} without --force.`);
-    }
-    let updated = false;
-    if (options.update) {
-      await runGit(["fetch", "--all", "--prune"], destination);
-      updated = true;
-    }
-    if (spec.ref) await runGit(["checkout", spec.ref], destination);
-    return { hostPath: destination, cloned: false, updated, message: `${destination} already cloned${updated ? " and fetched" : ""}` };
+    // User intent is source-dir-first: if a sibling with the target slug is already
+    // present, mount it rather than consulting the network. Origin mismatch is not
+    // an error; users manage repo identity/state themselves inside the VM.
+    if (target.ref) await runGit(["checkout", target.ref], destination);
+    return { hostPath: destination, cloned: false, message: `${destination} already exists in source` };
   }
 
   const cloneArgs = ["clone"];
   if (config.cloneMode === "shallow") cloneArgs.push("--depth", "1");
-  if (spec.ref && config.cloneMode === "shallow") cloneArgs.push("--branch", spec.ref);
-  cloneArgs.push(spec.cloneUrl, destination);
+  if (target.ref && config.cloneMode === "shallow") cloneArgs.push("--branch", target.ref);
+  cloneArgs.push(target.cloneUrl, destination);
   await runGit(cloneArgs);
-  if (spec.ref && config.cloneMode !== "shallow") await runGit(["checkout", spec.ref], destination);
-  return { hostPath: destination, cloned: true, updated: false, message: `cloned ${spec.display} to ${destination}` };
+  if (target.ref && config.cloneMode !== "shallow") await runGit(["checkout", target.ref], destination);
+  return { hostPath: destination, cloned: true, message: `cloned ${target.display} to ${destination}` };
 }
 
 export async function forceRemoveClone(path: string): Promise<void> {

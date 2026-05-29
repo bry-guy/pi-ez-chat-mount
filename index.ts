@@ -59,8 +59,7 @@ function parseMountArgs(args: string): MountArgs {
 
 function reloadHint(changed: boolean): string {
   if (!changed) return "";
-  if (process.env.PI_EZ_AUTO_RELOAD === "0") return "\n\nReload required: send @bot /new in the chat channel to recreate the pi-chat sandbox.";
-  return "\n\nReload required: pi-chat does not expose an extension API for restarting the current sandbox from inside the VM yet. Send @bot /new (or /chat-reload if installed) in the chat channel.";
+  return "\n\nReload required: send @bot /new in the chat channel to recreate the pi-chat sandbox. pi-chat handles /new before extension input hooks run, so this cannot be done from inside the VM.";
 }
 
 async function resolveMountHostPath(args: MountArgs, ctx: CommandContext): Promise<{ hostPath: string; cloneMessage?: string }> {
@@ -192,24 +191,13 @@ export default async function (pi: ExtensionAPI) {
     },
   });
 
-  pi.registerCommand("chat-reload", {
-    description: "Explain how to reload the current pi-chat sandbox",
-    handler: (_args, ctx) => {
-      notice(ctx, "Reload the pi-chat sandbox by sending @bot /new in the chat channel. pi-chat currently handles reload before extensions run, so /chat-reload cannot restart from inside the VM yet.", "warning");
-    },
-  });
-
   pi.on?.("input", async (event, ctx) => {
-    const match = matchSlashCommand(event.text, ["chat-mount", "chat-unmount", "chat-mounts", "chat-reload"]);
+    const match = matchSlashCommand(event.text, ["chat-mount", "chat-unmount", "chat-mounts"]);
     if (!match) return { action: "continue" };
     try {
       if (match.name === "chat-mount") return remoteResult(match.name, await chatMount(match.args, ctx));
       if (match.name === "chat-unmount") return remoteResult(match.name, await chatUnmount(match.args, ctx));
-      if (match.name === "chat-mounts") return remoteResult(match.name, await chatMounts(ctx, wrapper));
-      return {
-        action: "transform",
-        text: "The remote /chat-reload command cannot restart pi-chat from inside the VM because pi-chat handles /new before extension input hooks run. Reply to the user exactly: Send @bot /new as a separate message to reload this pi-chat sandbox.",
-      };
+      return remoteResult(match.name, await chatMounts(ctx, wrapper));
     } catch (error) {
       return remoteError(match.name, error);
     }

@@ -24,7 +24,6 @@ Load this extension before `pi-chat` creates the VM. Detached worker processes m
 - `/chat-mount <repo-url|owner/repo> [--read-only] [--force] [--update] [--source-dir <dir>]` — clone a remote repo on the host if needed, then mount that checkout. Explicit URLs are preserved; `owner/repo` uses GitHub SSH (`git@github.com:owner/repo.git`). The default source directory is `~/dev` or `PI_EZ_CHAT_MOUNT_SOURCE_DIR`.
 - `/chat-unmount <name>` — remove a configured mount. `<name>` may be `foo` or `/foo`.
 - `/chat-mounts` — show configured mounts and the last VM apply result.
-- `/chat-reload` — explains the current reload fallback. pi-chat handles `/new` before extension hooks run, so the real reload command remains `@bot /new` in chat.
 
 `/chat-mount` requires a connected `pi-chat` conversation (`/chat-connect ...`). The commands also work from pi-chat itself, including mention-only channels: `@bot /chat-mount bry-guy/pi-ez-chat-mount`, `/chat-mount bry-guy/pi-ez-chat-mount @bot`, and `@bot /chat-mounts`. Transcript-shaped forwarded lines such as `- [time] [uid:...] user: <@bot> /chat-mount ...` are also recognized.
 

@@ -9,6 +9,7 @@ import { conversationIdFromWorkspaceHostPath, identifyConversation } from "./src
 import { equalMount, partitionMounts, validateGuestPath } from "./src/validate.js";
 import { applyConfiguredMounts, installVmCreateWrapper } from "./src/wrapper.js";
 import { matchSlashCommand, normalizeRemoteCommandText, stripLeadingMention } from "./src/match.js";
+import { parseMountArgs } from "./index.js";
 import { parseMountTarget } from "./src/target.js";
 import { normalizeConfig } from "./src/config.js";
 import { resolveTargetHostPath } from "./src/resolve.js";
@@ -142,6 +143,26 @@ test("applyConfiguredMounts merges valid mounts and skips missing paths", async 
   assert.deepEqual(opts.vfs?.mounts?.["/repo"], { hostPath: dir, mode: "rw" });
   assert.equal(opts.vfs?.mounts?.["/gone"], undefined);
   assert.equal((last as { skipped: unknown[] }).skipped.length, 1);
+});
+
+test("parseMountArgs accepts zero, one, or many targets and parses flags", () => {
+  assert.deepEqual(parseMountArgs(""), { mode: "rw", force: false, rawTargets: [] });
+  assert.deepEqual(parseMountArgs("foo"), { mode: "rw", force: false, rawTargets: ["foo"] });
+  assert.deepEqual(parseMountArgs("foo bar baz"), { mode: "rw", force: false, rawTargets: ["foo", "bar", "baz"] });
+  assert.deepEqual(parseMountArgs("foo bar --read-only --force"), { mode: "ro", force: true, rawTargets: ["foo", "bar"] });
+  assert.deepEqual(parseMountArgs("--read-only foo --force bar"), { mode: "ro", force: true, rawTargets: ["foo", "bar"] });
+  assert.deepEqual(parseMountArgs('a b --source-dir=/tmp --forge gitlab'), {
+    mode: "rw",
+    force: false,
+    sourceDir: "/tmp",
+    forge: "gitlab",
+    rawTargets: ["a", "b"],
+  });
+});
+
+test("parseMountArgs rejects --update and unknown flags", () => {
+  assert.throws(() => parseMountArgs("foo --update"), /--update has been removed/);
+  assert.throws(() => parseMountArgs("foo --nope"), /Usage: \/chat-mount/);
 });
 
 test("installVmCreateWrapper is idempotent", async () => {

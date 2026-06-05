@@ -1,7 +1,4 @@
-import { existsSync } from "node:fs";
-import { homedir } from "node:os";
-import { join } from "node:path";
-import { pathToFileURL } from "node:url";
+import { importGondolinFromPiChat } from "./gondolin-resolver.js";
 import { appendDebugLine, loadMountStore, writeLastApply } from "./storage.js";
 import { identifyConversation } from "./conversation.js";
 import { partitionMounts, validateGuestPath } from "./validate.js";
@@ -85,30 +82,7 @@ export async function applyConfiguredMounts(
 }
 
 async function importGondolin(): Promise<VmModuleLike> {
-  try {
-    return (await import("@earendil-works/gondolin")) as VmModuleLike;
-  } catch (bareError) {
-    // pi-chat is commonly installed as a git pi package. Import its dependency by
-    // absolute path so we patch the same module instance pi-chat uses, without
-    // bundling a duplicate Gondolin copy in this package.
-    const fallback = join(
-      homedir(),
-      ".pi",
-      "agent",
-      "git",
-      "github.com",
-      "earendil-works",
-      "pi-chat",
-      "node_modules",
-      "@earendil-works",
-      "gondolin",
-      "dist",
-      "src",
-      "index.js",
-    );
-    if (existsSync(fallback)) return (await import(pathToFileURL(fallback).href)) as VmModuleLike;
-    throw bareError;
-  }
+  return importGondolinFromPiChat<VmModuleLike>();
 }
 
 export async function tryInstallRuntimeWrapper(): Promise<{ installed: boolean; error?: string }> {

@@ -27,14 +27,6 @@
     "test": "tsx --test test.ts",
     "typecheck": "tsc --noEmit"
   },
-  "peerDependencies": {
-    "@earendil-works/gondolin": "*"
-  },
-  "peerDependenciesMeta": {
-    "@earendil-works/gondolin": {
-      "optional": true
-    }
-  },
   "devDependencies": {
     "@types/node": "^22.15.21",
     "tsx": "^4.19.4",

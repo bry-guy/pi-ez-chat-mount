@@ -2,9 +2,9 @@ import type { CommandContext, ExtensionAPI, NotifyLevel } from "./src/pi-types.j
 import { deriveGuestPath, normalizeUnmountName } from "./src/mount-name.js";
 import { getPersistedConversationId } from "./src/conversation.js";
 import { equalMount } from "./src/validate.js";
+import { createMountContributor } from "./src/contributor.js";
 import { loadMountStore, readLastApply, saveMountStore } from "./src/storage.js";
 import { CONFIG_JSON_PATH, MOUNTS_JSON_PATH } from "./src/paths.js";
-import { tryInstallRuntimeWrapper } from "./src/wrapper.js";
 import { CHAT_VM_RESTART_HINT, matchSlashCommand } from "./src/match.js";
 import { loadConfig } from "./src/config.js";
 import { parseMountTarget } from "./src/target.js";
@@ -16,6 +16,7 @@ type CommandResult = { message: string; level?: NotifyLevel; changed?: boolean }
 type MountArgs = {
   mode: MountMode;
   force: boolean;
+  includeNodeModules: boolean;
   sourceDir?: string;
   forge?: string;
   rawTargets: string[];
@@ -36,17 +37,19 @@ function tokenize(raw: string): string[] {
 }
 
 const MOUNT_USAGE =
-  "Usage: /chat-mount [target ...] [--read-only] [--force] [--forge github|gitlab|bitbucket] [--source-dir <dir>]\n" +
+  "Usage: /chat-mount [target ...] [--read-only] [--include-node-modules] [--force] [--forge github|gitlab|bitbucket] [--source-dir <dir>]\n" +
   "  each target is a repo-name, owner/repo, or repo-url; with no targets, mounts the current cwd's git repo.";
 
 export function parseMountArgs(args: string): MountArgs {
   const tokens = tokenize(args);
   const positional: string[] = [];
-  const parsed: MountArgs = { mode: "rw", force: false, rawTargets: [] };
+  const parsed: MountArgs = { mode: "rw", force: false, includeNodeModules: false, rawTargets: [] };
   for (let i = 0; i < tokens.length; i++) {
     const token = tokens[i];
     if (token === "--read-only") parsed.mode = "ro";
     else if (token === "--force") parsed.force = true;
+    else if (token === "--include-node-modules") parsed.includeNodeModules = true;
+    else if (token === "--exclude-node-modules") parsed.includeNodeModules = false;
     else if (token === "--source-dir") parsed.sourceDir = tokens[++i];
     else if (token.startsWith("--source-dir=")) parsed.sourceDir = token.slice("--source-dir=".length);
     else if (token === "--forge") parsed.forge = tokens[++i];
@@ -119,6 +122,7 @@ type PlannedMount = {
   guestPath: string;
   hostPath: string;
   mode: MountMode;
+  includeNodeModules: boolean;
   resolutionMessage?: string;
   existing?: MountEntry;
   status: "added" | "replaced" | "unchanged" | "conflict";
@@ -136,6 +140,7 @@ async function chatMount(raw: string, ctx: CommandContext): Promise<CommandResul
     guestPath: deriveGuestPath(r.hostPath),
     hostPath: r.hostPath,
     mode: args.mode,
+    includeNodeModules: args.includeNodeModules,
     resolutionMessage: r.resolutionMessage,
     status: "added",
   }));
@@ -157,7 +162,7 @@ async function chatMount(raw: string, ctx: CommandContext): Promise<CommandResul
   for (const plan of plans) {
     const existing = existingForConversation[plan.guestPath];
     plan.existing = existing;
-    const entry: MountEntry = { hostPath: plan.hostPath, mode: plan.mode };
+    const entry: MountEntry = { hostPath: plan.hostPath, mode: plan.mode, includeNodeModules: plan.includeNodeModules };
     if (!existing) plan.status = "added";
     else if (equalMount(existing, entry)) plan.status = "unchanged";
     else if (args.force) plan.status = "replaced";
@@ -167,12 +172,16 @@ async function chatMount(raw: string, ctx: CommandContext): Promise<CommandResul
   const writes = plans.filter((p) => p.status === "added" || p.status === "replaced");
   if (writes.length > 0) {
     const next = { ...existingForConversation };
-    for (const p of writes) next[p.guestPath] = { hostPath: p.hostPath, mode: p.mode };
+    for (const p of writes) next[p.guestPath] = { hostPath: p.hostPath, mode: p.mode, includeNodeModules: p.includeNodeModules };
     store[conversationId] = next;
     await saveMountStore(store);
   }
 
   return formatMountResult(plans, conversationId);
+}
+
+function formatNodeModulesPolicy(mount: Pick<MountEntry, "includeNodeModules">): string {
+  return mount.includeNodeModules ? "node_modules included" : "node_modules excluded";
 }
 
 function formatMountResult(plans: PlannedMount[], conversationId: string): CommandResult {
@@ -183,14 +192,14 @@ function formatMountResult(plans: PlannedMount[], conversationId: string): Comma
   const changed = added.length + replaced.length > 0;
 
   const lines: string[] = [];
-  for (const p of added) lines.push(`Configured ${p.guestPath} -> ${p.hostPath} (${p.mode}) for ${conversationId}.`);
-  for (const p of replaced) lines.push(`Replaced ${p.guestPath} -> ${p.hostPath} (${p.mode}) for ${conversationId}.`);
-  for (const p of unchanged) lines.push(`${p.guestPath} is already configured for ${conversationId}.`);
+  for (const p of added) lines.push(`Configured ${p.guestPath} -> ${p.hostPath} (${p.mode}, ${formatNodeModulesPolicy(p)}) for ${conversationId}.`);
+  for (const p of replaced) lines.push(`Replaced ${p.guestPath} -> ${p.hostPath} (${p.mode}, ${formatNodeModulesPolicy(p)}) for ${conversationId}.`);
+  for (const p of unchanged) lines.push(`${p.guestPath} is already configured for ${conversationId} (${formatNodeModulesPolicy(p)}).`);
   for (const p of conflicts) {
     const existing = p.existing!;
     lines.push(
       `Mount ${p.guestPath} already exists for ${conversationId}: ${existing.hostPath} (${existing.mode}). ` +
-        `Refusing to clobber it with ${p.hostPath} (${p.mode}) without confirmation. ` +
+        `Refusing to clobber it with ${p.hostPath} (${p.mode}, ${formatNodeModulesPolicy(p)}) without confirmation. ` +
         `Rerun with --force to replace it.`,
     );
   }
@@ -241,20 +250,20 @@ async function chatUnmountAll(ctx: CommandContext): Promise<CommandResult> {
   return { changed: true, message: `Removed ${count} configured mount${count === 1 ? "" : "s"} for ${conversationId}.` };
 }
 
-async function chatMounts(ctx: CommandContext, wrapper: Awaited<ReturnType<typeof tryInstallRuntimeWrapper>>): Promise<CommandResult> {
+async function chatMounts(ctx: CommandContext): Promise<CommandResult> {
   const conversationId = getPersistedConversationId(ctx);
   const store = await loadMountStore();
   const ids = conversationId ? [conversationId] : Object.keys(store).sort();
   const lines: string[] = [];
   lines.push(`storage: ${MOUNTS_JSON_PATH}`);
   lines.push(`config: ${CONFIG_JSON_PATH}`);
-  lines.push(`VM.create wrapper: ${wrapper.error ? `not installed (${wrapper.error})` : wrapper.installed ? "installed" : "already installed"}`);
+  lines.push("VM config: registered with pi-chat contributor registry");
   for (const id of ids) {
     const mounts = store[id] ?? {};
     lines.push(`\nconfigured for next VM reload — ${id}:`);
     const entries = Object.entries(mounts);
     if (entries.length === 0) lines.push("  (no configured mounts)");
-    for (const [guestPath, mount] of entries) lines.push(`  ${guestPath} -> ${mount.hostPath} (${mount.mode})`);
+    for (const [guestPath, mount] of entries) lines.push(`  ${guestPath} -> ${mount.hostPath} (${mount.mode}, ${formatNodeModulesPolicy(mount)})`);
   }
   const last = await readLastApply();
   if (last && (!conversationId || last.conversationId === conversationId)) {
@@ -285,7 +294,15 @@ function remoteError(command: string, error: unknown) {
 }
 
 export default async function (pi: ExtensionAPI) {
-  const wrapper = await tryInstallRuntimeWrapper();
+  const registryKey = Symbol.for("pi-chat.vmConfigContributors.v1");
+  const registeredKey = Symbol.for("pi-ez-chat-mount.vmConfigContributorRegistered");
+  const globals = globalThis as Record<symbol, unknown>;
+  if (!globals[registeredKey]) {
+    const registry = (globals[registryKey] as { contributors: unknown[] } | undefined) ?? { contributors: [] };
+    globals[registryKey] = registry;
+    registry.contributors.push(createMountContributor());
+    globals[registeredKey] = true;
+  }
 
   pi.registerCommand("chat-mount", {
     description: "Mount this cwd, or one or more git repositories, into the connected pi-chat Gondolin VM after restart",
@@ -327,7 +344,7 @@ export default async function (pi: ExtensionAPI) {
     description: "List configured and last-applied pi-chat sibling mounts",
     handler: async (_args, ctx) => {
       try {
-        const result = await chatMounts(ctx, wrapper);
+        const result = await chatMounts(ctx);
         notice(ctx, result.message, result.level);
       } catch (error) {
         notice(ctx, error instanceof Error ? error.message : String(error), "error");
@@ -342,7 +359,7 @@ export default async function (pi: ExtensionAPI) {
       if (match.name === "chat-mount") return remoteResult(match.name, await chatMount(match.args, ctx), ctx);
       if (match.name === "chat-unmount") return remoteResult(match.name, await chatUnmount(match.args, ctx), ctx);
       if (match.name === "chat-unmount-all") return remoteResult(match.name, await chatUnmountAll(ctx), ctx);
-      return remoteResult(match.name, await chatMounts(ctx, wrapper), ctx);
+      return remoteResult(match.name, await chatMounts(ctx), ctx);
     } catch (error) {
       return remoteError(match.name, error);
     }

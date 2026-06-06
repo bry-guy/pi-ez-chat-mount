@@ -15,7 +15,7 @@ export function validateGuestPath(guestPath: string): string | undefined {
 }
 
 export function equalMount(a: MountEntry, b: MountEntry): boolean {
-  return a.hostPath === b.hostPath && a.mode === b.mode;
+  return a.hostPath === b.hostPath && a.mode === b.mode && Boolean(a.includeNodeModules) === Boolean(b.includeNodeModules);
 }
 
 export async function partitionMounts(configured: ConversationMounts): Promise<{ applied: AppliedMount[]; skipped: SkippedMount[] }> {

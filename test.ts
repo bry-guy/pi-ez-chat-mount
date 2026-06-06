@@ -6,14 +6,15 @@ import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { sanitizeSegment, deriveGuestPath, normalizeUnmountName } from "./src/mount-name.js";
 import { conversationIdFromWorkspaceHostPath, identifyConversation } from "./src/conversation.js";
+import { createMountContributor } from "./src/contributor.js";
 import { equalMount, partitionMounts, validateGuestPath } from "./src/validate.js";
-import { applyConfiguredMounts, installVmCreateWrapper } from "./src/wrapper.js";
 import { matchSlashCommand, normalizeRemoteCommandText, stripLeadingMention } from "./src/match.js";
+import { excludeNodeModulesProvider, pathIncludesNodeModules } from "./src/filter-provider.js";
 import { parseMountArgs } from "./index.js";
 import { parseMountTarget } from "./src/target.js";
 import { normalizeConfig } from "./src/config.js";
 import { resolveTargetHostPath } from "./src/resolve.js";
-import type { MountStore, VmCreateOptionsLike } from "./src/types.js";
+import type { MountStore } from "./src/types.js";
 
 test("sanitizes mount path segments", () => {
   assert.equal(sanitizeSegment(" My Repo!! "), "my-repo");
@@ -119,41 +120,65 @@ test("partitions missing and present host paths", async () => {
 
 test("rejects colliding mount config", () => {
   assert.equal(equalMount({ hostPath: "/a", mode: "rw" }, { hostPath: "/a", mode: "rw" }), true);
+  assert.equal(equalMount({ hostPath: "/a", mode: "rw" }, { hostPath: "/a", mode: "rw", includeNodeModules: false }), true);
+  assert.equal(equalMount({ hostPath: "/a", mode: "rw", includeNodeModules: true }, { hostPath: "/a", mode: "rw" }), false);
   assert.equal(equalMount({ hostPath: "/a", mode: "rw" }, { hostPath: "/a", mode: "ro" }), false);
 });
 
-test("applyConfiguredMounts merges valid mounts and skips missing paths", async () => {
+test("mount contributor returns valid mounts and skips missing paths", async () => {
   const dir = await mkdtemp(join(tmpdir(), "chat-mount-"));
-  const workspace = `${homedir()}/.pi/agent/chat/accounts/acct/channels/chan/workspace`;
   const store: MountStore = {
     "acct/chan": {
       "/repo": { hostPath: dir, mode: "rw" },
+      "/readonly": { hostPath: dir, mode: "ro", includeNodeModules: true },
       "/gone": { hostPath: join(dir, "gone"), mode: "rw" },
     },
   };
-  const opts: VmCreateOptionsLike = { vfs: { mounts: { "/workspace": { rootPath: workspace }, "/shared": {} } } };
   let last: unknown;
-  await applyConfiguredMounts(opts, (hostPath, mode) => ({ hostPath, mode }), {
+  class RealFSProvider {
+    constructor(public hostPath: string) {}
+  }
+  class ReadonlyProvider {
+    constructor(public provider: unknown) {}
+  }
+  const contributor = createMountContributor({
     loadStore: async () => store,
     writeLast: async (state) => {
       last = state;
     },
     debug: async () => undefined,
   });
-  assert.deepEqual(opts.vfs?.mounts?.["/repo"], { hostPath: dir, mode: "rw" });
-  assert.equal(opts.vfs?.mounts?.["/gone"], undefined);
+  const fragment = await contributor.contribute({ conversationId: "acct/chan", gondolin: { RealFSProvider, ReadonlyProvider } });
+  assert.deepEqual(fragment?.vfs?.mounts?.["/repo"], new RealFSProvider(dir));
+  assert.deepEqual(fragment?.vfs?.mounts?.["/readonly"], new ReadonlyProvider(new RealFSProvider(dir)));
+  assert.equal(fragment?.vfs?.mounts?.["/gone"], undefined);
   assert.equal((last as { skipped: unknown[] }).skipped.length, 1);
 });
 
+
+
+test("node_modules filter hides directory entries and rejects nested paths", async () => {
+  assert.equal(pathIncludesNodeModules("node_modules/pkg"), true);
+  assert.equal(pathIncludesNodeModules("src/not_node_modules/file"), false);
+  const provider = excludeNodeModulesProvider({
+    readdir: () => ["src", "node_modules", { name: "node_modules" }, { name: "package.json" }],
+    readFile: (path: string) => `read ${path}`,
+  }) as { readdir(): unknown[]; readFile(path: string): string };
+  assert.deepEqual(provider.readdir(), ["src", { name: "package.json" }]);
+  assert.equal(provider.readFile("src/index.ts"), "read src/index.ts");
+  assert.throws(() => provider.readFile("node_modules/pkg/index.js"), /node_modules is excluded/);
+});
+
 test("parseMountArgs accepts zero, one, or many targets and parses flags", () => {
-  assert.deepEqual(parseMountArgs(""), { mode: "rw", force: false, rawTargets: [] });
-  assert.deepEqual(parseMountArgs("foo"), { mode: "rw", force: false, rawTargets: ["foo"] });
-  assert.deepEqual(parseMountArgs("foo bar baz"), { mode: "rw", force: false, rawTargets: ["foo", "bar", "baz"] });
-  assert.deepEqual(parseMountArgs("foo bar --read-only --force"), { mode: "ro", force: true, rawTargets: ["foo", "bar"] });
-  assert.deepEqual(parseMountArgs("--read-only foo --force bar"), { mode: "ro", force: true, rawTargets: ["foo", "bar"] });
-  assert.deepEqual(parseMountArgs('a b --source-dir=/tmp --forge gitlab'), {
+  assert.deepEqual(parseMountArgs(""), { mode: "rw", force: false, includeNodeModules: false, rawTargets: [] });
+  assert.deepEqual(parseMountArgs("foo"), { mode: "rw", force: false, includeNodeModules: false, rawTargets: ["foo"] });
+  assert.deepEqual(parseMountArgs("foo bar baz"), { mode: "rw", force: false, includeNodeModules: false, rawTargets: ["foo", "bar", "baz"] });
+  assert.deepEqual(parseMountArgs("foo bar --read-only --force"), { mode: "ro", force: true, includeNodeModules: false, rawTargets: ["foo", "bar"] });
+  assert.deepEqual(parseMountArgs("--read-only foo --force bar"), { mode: "ro", force: true, includeNodeModules: false, rawTargets: ["foo", "bar"] });
+  assert.deepEqual(parseMountArgs('a b --include-node-modules --source-dir=/tmp --forge gitlab'), {
     mode: "rw",
     force: false,
+    includeNodeModules: true,
     sourceDir: "/tmp",
     forge: "gitlab",
     rawTargets: ["a", "b"],
@@ -163,20 +188,4 @@ test("parseMountArgs accepts zero, one, or many targets and parses flags", () =>
 test("parseMountArgs rejects --update and unknown flags", () => {
   assert.throws(() => parseMountArgs("foo --update"), /--update has been removed/);
   assert.throws(() => parseMountArgs("foo --nope"), /Usage: \/chat-mount/);
-});
-
-test("installVmCreateWrapper is idempotent", async () => {
-  let calls = 0;
-  const module = {
-    VM: {
-      create: async (options?: VmCreateOptionsLike) => {
-        calls++;
-        return options;
-      },
-    },
-  };
-  assert.equal(installVmCreateWrapper(module), true);
-  assert.equal(installVmCreateWrapper(module), false);
-  await module.VM.create({});
-  assert.equal(calls, 1);
 });

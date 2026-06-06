@@ -3,6 +3,7 @@ export type MountMode = "rw" | "ro";
 export type MountEntry = {
   hostPath: string;
   mode: MountMode;
+  includeNodeModules?: boolean;
 };
 
 export type ConversationMounts = Record<string, MountEntry>;

@@ -5,7 +5,7 @@ import { equalMount } from "./src/validate.js";
 import { createMountContributor } from "./src/contributor.js";
 import { loadMountStore, readLastApply, saveMountStore } from "./src/storage.js";
 import { CONFIG_JSON_PATH, MOUNTS_JSON_PATH } from "./src/paths.js";
-import { CHAT_VM_RESTART_HINT, matchSlashCommand } from "./src/match.js";
+import { matchSlashCommand, scheduleCurrentPiChatWorkerRespawn } from "./src/match.js";
 import { loadConfig } from "./src/config.js";
 import { parseMountTarget } from "./src/target.js";
 import { resolveCurrentRepoHostPath, resolveTargetHostPath } from "./src/resolve.js";
@@ -62,9 +62,9 @@ export function parseMountArgs(args: string): MountArgs {
   return parsed;
 }
 
-function reloadHint(changed: boolean): string {
+function reloadHint(changed: boolean, ctx: CommandContext): string {
   if (!changed) return "";
-  return `\n\n${CHAT_VM_RESTART_HINT}`;
+  return `\n\n${scheduleCurrentPiChatWorkerRespawn(ctx, { delaySeconds: 3 }).message}`;
 }
 
 type ResolvedMountTarget = { rawTarget?: string; hostPath: string; resolutionMessage?: string };
@@ -278,8 +278,8 @@ function fenced(text: string): string {
   return `\`\`\`\n${text.replace(/```/g, "`​``")}\n\`\`\``;
 }
 
-async function remoteResult(command: string, result: CommandResult, _ctx: CommandContext) {
-  const suffix = reloadHint(result.changed ?? false);
+async function remoteResult(command: string, result: CommandResult, ctx: CommandContext) {
+  const suffix = reloadHint(result.changed ?? false, ctx);
   return {
     action: "transform" as const,
     text: `The remote /${command} command completed. Reply to the user with exactly this fenced code block and no other text:\n\n${fenced(`${result.message}${suffix}`)}`,
@@ -309,7 +309,7 @@ export default async function (pi: ExtensionAPI) {
     handler: async (args, ctx) => {
       try {
         const result = await chatMount(args, ctx);
-        notice(ctx, `${result.message}${reloadHint(result.changed ?? false)}`, result.level);
+        notice(ctx, `${result.message}${reloadHint(result.changed ?? false, ctx)}`, result.level);
       } catch (error) {
         notice(ctx, error instanceof Error ? error.message : String(error), "error");
       }
@@ -321,7 +321,7 @@ export default async function (pi: ExtensionAPI) {
     handler: async (args, ctx) => {
       try {
         const result = await chatUnmount(args, ctx);
-        notice(ctx, `${result.message}${reloadHint(result.changed ?? false)}`, result.level);
+        notice(ctx, `${result.message}${reloadHint(result.changed ?? false, ctx)}`, result.level);
       } catch (error) {
         notice(ctx, error instanceof Error ? error.message : String(error), "error");
       }
@@ -333,7 +333,7 @@ export default async function (pi: ExtensionAPI) {
     handler: async (_args, ctx) => {
       try {
         const result = await chatUnmountAll(ctx);
-        notice(ctx, `${result.message}${reloadHint(result.changed ?? false)}`, result.level);
+        notice(ctx, `${result.message}${reloadHint(result.changed ?? false, ctx)}`, result.level);
       } catch (error) {
         notice(ctx, error instanceof Error ? error.message : String(error), "error");
       }

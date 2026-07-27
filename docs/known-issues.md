@@ -2,8 +2,8 @@
 
 The architectural workarounds in this package (monkey-patching
 `@earendil-works/gondolin`'s `VM.create`, identifying the conversation from
-`opts.sessionLabel` + workspace path, prompting the user to type `/new`
-instead of restarting the sandbox programmatically) all exist because
+`opts.sessionLabel` + workspace path, and restarting through the shared
+`pi-ez-lib` tmux respawn helper instead of an upstream restart API) all exist because
 upstream `pi-chat` does not expose the hooks we would need to do these
 things cleanly.
 
@@ -15,10 +15,9 @@ exact ask and source-code receipts — lives in a single rollup:
 Items relevant to this package:
 
 - §1 — extension API to restart the current conversation sandbox (so
-  `/chat-mount` does not have to ask the user to type `@bot /new`, and the
-  previous tmux-respawn workaround can stay deleted; that workaround
-  killed the user's pi session whenever `/chat-mount` ran from a non-worker
-  pane).
+  `/chat-mount` can stop using the shared tmux-respawn workaround; the
+  current helper explicitly reconnects pi-chat, but a first-class VM restart
+  hook would be cleaner and race-free).
 - §2 — extension contributions to `VM.create` options (so the `VM.create`
   wrapper in `src/wrapper.ts` can be deleted in favor of pi-chat config).
 - §5 — confirm and document read-only mount semantics in Gondolin (today

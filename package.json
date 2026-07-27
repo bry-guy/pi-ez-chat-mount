@@ -36,6 +36,6 @@
     "node": ">=20"
   },
   "dependencies": {
-    "pi-ez-lib": "https://github.com/bry-guy/pi-ez-lib/archive/refs/tags/v0.1.6.tar.gz"
+    "pi-ez-lib": "https://github.com/bry-guy/pi-ez-lib/archive/refs/tags/v0.1.7.tar.gz"
   }
 }

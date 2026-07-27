@@ -12,7 +12,7 @@ Status: implemented in 0.2.0.
 6. **Dropped `--update`**: users manage repo state from inside the VM via normal `git fetch` / `git pull`.
 7. **Added `/chat-unmount-all`**: clear all mounts for the connected conversation.
 8. **`/chat-mounts`** now distinguishes "configured for next VM reload" from "active in VM (snapshot from last `VM.create`)".
-9. **Remote restart**: remote mount changes print the shared hint `` Restart via `/new` for changes to take effect. ``. The extension no longer schedules a tmux pane respawn (it killed the user's pi session when run from a non-worker pane). See [`pi-ez-lib/wishlist.md`](../../pi-ez-lib/wishlist.md) for the upstream API needed to do this safely.
+9. **Remote restart**: remote mount changes use `pi-ez-lib`'s explicit pi-chat worker respawn helper, which restarts Gondolin and reconnects to the same pi session/conversation. See [`pi-ez-lib/wishlist.md`](../../pi-ez-lib/wishlist.md) for the desired upstream API that would remove the tmux workaround entirely.
 
 ## Target shapes
 

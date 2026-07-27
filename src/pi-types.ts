@@ -2,7 +2,7 @@ export type NotifyLevel = "info" | "warning" | "error";
 
 export type CommandContext = {
   cwd: string;
-  sessionManager: { getEntries(): unknown[] };
+  sessionManager: { getEntries(): unknown[]; getSessionFile?(): string | undefined };
   ui: { notify(message: string, level?: NotifyLevel): void };
 };
 

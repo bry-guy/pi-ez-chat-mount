@@ -1,6 +1,7 @@
 export {
   CHAT_VM_RESTART_HINT,
   matchSlashCommand,
+  scheduleCurrentPiChatWorkerRespawn,
   normalizeRemoteCommandText,
   stripLeadingMention,
   stripTrailingMention,

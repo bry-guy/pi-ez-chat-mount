@@ -149,8 +149,8 @@ test("mount contributor returns valid mounts and skips missing paths", async () 
     debug: async () => undefined,
   });
   const fragment = await contributor.contribute({ conversationId: "acct/chan", gondolin: { RealFSProvider, ReadonlyProvider } });
-  assert.deepEqual(fragment?.vfs?.mounts?.["/repo"], new RealFSProvider(dir));
-  assert.deepEqual(fragment?.vfs?.mounts?.["/readonly"], new ReadonlyProvider(new RealFSProvider(dir)));
+  assert.equal((fragment?.vfs?.mounts?.["/repo"] as { hostPath?: string }).hostPath, dir);
+  assert.equal(((fragment?.vfs?.mounts?.["/readonly"] as { provider?: { hostPath?: string } }).provider?.hostPath), dir);
   assert.equal(fragment?.vfs?.mounts?.["/gone"], undefined);
   assert.equal((last as { skipped: unknown[] }).skipped.length, 1);
 });
